@@ -1,0 +1,8 @@
+{
+  "name": "Vanguard Ops — Unified RMM, Vulnerability & SOC Platform",
+  "description": "Enterprise cybersecurity and endpoint operations SaaS combining Action1-style patch management, ConnectSecure-style risk prioritization, and SOC/SIEM threat operations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
