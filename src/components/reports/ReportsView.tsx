@@ -661,7 +661,7 @@ export const ReportsView: React.FC = () => {
                     </span>
 
                     <button
-                      onClick={() => triggerReportNow(schedule.reportType, schedule.format, schedule.id)}
+                      onClick={() => triggerReportNow(schedule.id, schedule.reportType, (schedule.formats?.[0] || 'PDF'))}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 text-blue-700 dark:text-blue-300 rounded-lg text-xs font-bold transition-all cursor-pointer"
                     >
                       <Play className="w-3 h-3" />

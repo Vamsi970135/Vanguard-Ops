@@ -26,10 +26,13 @@ import {
   X,
   Sliders,
   ShieldCheck,
-  KeyRound
+  KeyRound,
+  History
 } from 'lucide-react';
 import { ExportDropdown } from '../common/ExportDropdown';
 import { exportToCSV, exportToPDF, exportToExcel, exportToDocument, exportToJSON } from '../../utils/exportUtils';
+import { ActionHistoryAuditLog } from './ActionHistoryAuditLog';
+import { RBACManagement } from './RBACManagement';
 
 export const AdminManagement: React.FC = () => {
   const {
@@ -41,8 +44,11 @@ export const AdminManagement: React.FC = () => {
     deleteOrganization,
     updateOrganization,
     auditLogs,
+    recordAuditLog,
     currentUser,
     setUserRole,
+    roles,
+    systemUsers,
     addToast,
     setActiveNav
   } = useApp();
@@ -153,6 +159,16 @@ export const AdminManagement: React.FC = () => {
   const handleSaveBranding = (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavedBrand(true);
+    recordAuditLog({
+      category: 'System Setting',
+      action: 'Brand Caption & Platform Whitelabel Updated',
+      object: `Brand: ${brandTitle} | Caption: "${brandCaption}"`,
+      previousValue: 'Default Vanguard Brand Metadata',
+      newValue: `Title: ${brandTitle}, Caption: "${brandCaption}", Company: ${brandCompany}, Email: ${supportEmail}`,
+      diffSummary: `~ Brand Caption: "${brandCaption}"\n~ Support Contact: ${supportEmail}`,
+      result: 'Success',
+      severity: 'Info'
+    });
     addToast('Brand Settings Saved', `Platform caption updated to "${brandCaption}".`, 'success');
     setTimeout(() => setIsSavedBrand(false), 3000);
   };
@@ -248,8 +264,8 @@ export const AdminManagement: React.FC = () => {
               : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'
           }`}
         >
-          <Users className="w-3.5 h-3.5" />
-          <span>Users & RBAC ({usersList.length})</span>
+          <ShieldCheck className="w-3.5 h-3.5" />
+          <span>RBAC & User Access ({roles.length} Roles, {systemUsers.length} Users)</span>
         </button>
 
         <button
@@ -261,8 +277,8 @@ export const AdminManagement: React.FC = () => {
               : 'border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'
           }`}
         >
-          <ShieldCheck className="w-3.5 h-3.5" />
-          <span>Immutable Audit Trail ({auditLogs.length})</span>
+          <History className="w-3.5 h-3.5" />
+          <span>Action History & Audit Logs ({auditLogs.length})</span>
         </button>
       </div>
 
@@ -547,162 +563,17 @@ export const AdminManagement: React.FC = () => {
       )}
 
       {/* ------------------------------------------------------------- */}
-      {/* TAB: USERS & RBAC */}
+      {/* TAB: USERS & RBAC GOVERNANCE */}
       {/* ------------------------------------------------------------- */}
       {activeTab === 'users' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-slate-500">
-              Manage operator credentials, MFA status, and tenant authorization policies.
-            </p>
-            <button
-              onClick={() => setNewUserModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-2xs transition-all cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add User</span>
-            </button>
-          </div>
-
-          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-xl overflow-hidden shadow-xs">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-slate-50/80 dark:bg-slate-950 text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider border-b border-slate-200/80 dark:border-slate-800/80">
-                  <th className="px-4 py-3">Operator Name</th>
-                  <th className="px-4 py-3">Email Address</th>
-                  <th className="px-4 py-3">Assigned Tenant Scope</th>
-                  <th className="px-4 py-3">RBAC Role</th>
-                  <th className="px-4 py-3">MFA Status</th>
-                  <th className="px-4 py-3 text-right">Last Login</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {usersList.map(user => (
-                  <tr key={user.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                    <td className="px-4 py-3 font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center text-[10px] font-bold">
-                        {user.name.substring(0, 1)}
-                      </div>
-                      {user.name}
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 font-mono">{user.email}</td>
-                    <td className="px-4 py-3 text-slate-700 dark:text-slate-300 font-medium">{user.org}</td>
-                    <td className="px-4 py-3">
-                      <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-bold text-[10px] border border-blue-200/80 dark:border-blue-800/80 shadow-2xs font-mono">
-                        {user.role}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {user.mfa ? (
-                        <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Enforced
-                        </span>
-                      ) : (
-                        <span className="text-amber-500 font-semibold">Not Enforced</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right text-slate-400 dark:text-slate-500 font-mono">{user.lastLogin}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <RBACManagement />
       )}
 
       {/* ------------------------------------------------------------- */}
-      {/* TAB: AUDIT LOG */}
+      {/* TAB: ACTION HISTORY & AUDIT LOG */}
       {/* ------------------------------------------------------------- */}
       {activeTab === 'audit' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-slate-500">
-              Cryptographically signed immutable trail of all tenant configuration and operator actions.
-            </p>
-            <ExportDropdown
-              label="Export Audit Trail"
-              entityName="Audit Logs"
-              totalCount={auditLogs.length}
-              filteredCount={auditLogs.length}
-              onExportCSV={() => {
-                const headers = ['Timestamp', 'User', 'Action', 'Target Object', 'Organization', 'Result'];
-                const rows = auditLogs.map(l => [l.timestamp, l.user, l.action, l.object, l.organization, l.result]);
-                exportToCSV({
-                  filename: 'vanguard_audit_logs',
-                  title: 'SOC Immutable Audit Log',
-                  orgName: currentOrg.name,
-                  headers,
-                  rows
-                });
-              }}
-              onExportPDF={() => {
-                const headers = ['Timestamp', 'User', 'Action', 'Target Object', 'Result'];
-                const rows = auditLogs.map(l => [l.timestamp, l.user, l.action, l.object, l.result]);
-                exportToPDF({
-                  filename: 'vanguard_audit_logs',
-                  title: 'SOC Immutable Compliance Audit Trail',
-                  orgName: currentOrg.name,
-                  headers,
-                  rows
-                });
-              }}
-              onExportExcel={() => {
-                const headers = ['Timestamp', 'User', 'Action', 'Target Object', 'Organization', 'Result'];
-                const rows = auditLogs.map(l => [l.timestamp, l.user, l.action, l.object, l.organization, l.result]);
-                exportToExcel({
-                  filename: 'vanguard_audit_logs',
-                  title: 'SOC Immutable Audit Trail',
-                  orgName: currentOrg.name,
-                  headers,
-                  rows
-                });
-              }}
-              onExportDoc={() => {
-                const headers = ['Timestamp', 'User', 'Action', 'Target Object', 'Result'];
-                const rows = auditLogs.map(l => [l.timestamp, l.user, l.action, l.object, l.result]);
-                exportToDocument({
-                  filename: 'vanguard_audit_logs_report',
-                  title: 'SOC Compliance & Governance Audit Report',
-                  orgName: currentOrg.name,
-                  headers,
-                  rows
-                });
-              }}
-              onExportJSON={() => {
-                exportToJSON('vanguard_audit_logs', 'SOC Immutable Audit Trail Export', currentOrg.name, auditLogs);
-              }}
-            />
-          </div>
-
-          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800/80 rounded-xl overflow-hidden shadow-xs">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-slate-50/80 dark:bg-slate-950 text-slate-400 dark:text-slate-500 text-[10px] font-bold uppercase tracking-wider border-b border-slate-200/80 dark:border-slate-800/80">
-                  <th className="px-4 py-3">Timestamp</th>
-                  <th className="px-4 py-3">Actor / User</th>
-                  <th className="px-4 py-3">Tenant Org</th>
-                  <th className="px-4 py-3">Action</th>
-                  <th className="px-4 py-3">Target / Object</th>
-                  <th className="px-4 py-3 text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {auditLogs.map(log => (
-                  <tr key={log.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 font-mono text-[11px] transition-colors">
-                    <td className="px-4 py-3 text-slate-400 dark:text-slate-500">{log.timestamp}</td>
-                    <td className="px-4 py-3 font-bold text-slate-800 dark:text-slate-200">{log.user}</td>
-                    <td className="px-4 py-3 text-slate-500 font-sans">{log.organization}</td>
-                    <td className="px-4 py-3 text-blue-600 dark:text-blue-400 font-semibold">{log.action}</td>
-                    <td className="px-4 py-3 text-slate-600 dark:text-slate-300">{log.object}</td>
-                    <td className="px-4 py-3 text-right">
-                      <span className="text-emerald-600 dark:text-emerald-400 font-bold">{log.result}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <ActionHistoryAuditLog />
       )}
 
       {/* ------------------------------------------------------------- */}

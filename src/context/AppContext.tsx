@@ -16,7 +16,9 @@ import {
   AuditLog,
   OrganizationRole,
   ReportSchedule,
-  ReportExecutionLog
+  ReportExecutionLog,
+  CustomRole,
+  SystemPermission
 } from '../types';
 import {
   mockOrganizations,
@@ -36,6 +38,11 @@ import {
   mockReportSchedules,
   mockReportExecutionLogs
 } from '../data/mockData';
+import {
+  SYSTEM_PERMISSIONS,
+  INITIAL_CUSTOM_ROLES,
+  INITIAL_SYSTEM_USERS
+} from '../data/rbacData';
 
 export interface ToastMessage {
   id: string;
@@ -65,9 +72,10 @@ interface AppContextType {
   selectedOrgId: string;
   organizations: Organization[];
   switchOrg: (orgId: string) => void;
-  addOrganization: (newOrg: Partial<Organization>) => void;
+  addOrganization: (newOrg: Partial<Organization>) => Organization;
   deleteOrganization: (orgId: string) => void;
   updateOrganization: (orgId: string, updates: Partial<Organization>) => void;
+  recordAuditLog: (entry: Partial<AuditLog> & { action: string; object: string }) => void;
   
   currentUser: User;
   setUserRole: (role: OrganizationRole) => void;
@@ -132,6 +140,18 @@ interface AppContextType {
   toggleReportSchedule: (id: string) => void;
   triggerReportNow: (scheduleId?: string, reportType?: string, format?: 'PDF' | 'DOC' | 'EXCEL' | 'CSV' | 'JSON') => void;
 
+  // RBAC & Custom Roles
+  roles: CustomRole[];
+  systemUsers: User[];
+  systemPermissions: SystemPermission[];
+  addCustomRole: (roleData: Partial<CustomRole>) => CustomRole;
+  updateCustomRole: (roleId: string, updates: Partial<CustomRole>) => void;
+  deleteCustomRole: (roleId: string) => boolean;
+  cloneCustomRole: (roleId: string, newName?: string) => CustomRole;
+  addSystemUser: (userData: Partial<User>) => User;
+  updateSystemUser: (userId: string, updates: Partial<User>) => void;
+  deleteSystemUser: (userId: string) => void;
+
   // Live Simulation state
   isLiveSimulationActive: boolean;
   toggleLiveSimulation: () => void;
@@ -168,6 +188,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [rawAuditLogs, setAuditLogs] = useState<AuditLog[]>(mockAuditLogs);
   const [rawReportSchedules, setReportSchedules] = useState<ReportSchedule[]>(mockReportSchedules);
   const [rawReportLogs, setReportLogs] = useState<ReportExecutionLog[]>(mockReportExecutionLogs);
+  const [roles, setRoles] = useState<CustomRole[]>(INITIAL_CUSTOM_ROLES);
+  const [systemUsers, setSystemUsers] = useState<User[]>(INITIAL_SYSTEM_USERS);
 
   const [selectedEndpoint, setSelectedEndpoint] = useState<Endpoint | null>(null);
   const [selectedAlert, setSelectedAlert] = useState<SOCAlert | null>(null);
@@ -325,6 +347,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     // Switch to newly created tenant
     setSelectedOrgId(newId);
     addToast('Tenant Created Successfully', `Provisioned tenant ${createdOrg.name}. Active view automatically switched.`, 'success');
+    return createdOrg;
   }, [currentUser, addToast]);
 
   const deleteOrganization = useCallback((orgId: string) => {
@@ -403,21 +426,39 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return () => clearInterval(interval);
   }, [isLiveSimulationActive]);
 
-  const recordAudit = useCallback((action: string, object: string, prevVal: string, newVal: string) => {
+  const recordAuditLog = useCallback((entry: Partial<AuditLog> & { action: string; object: string }) => {
+    const randomHex = Array.from({ length: 16 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
     const newLog: AuditLog = {
-      id: `aud-${Date.now()}`,
-      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-      user: `${currentUser.name} (${currentUser.role})`,
-      organization: currentOrg.name,
-      ip: '10.240.5.12',
+      id: entry.id || `aud-${Date.now().toString(36)}-${Math.floor(Math.random() * 1000)}`,
+      timestamp: entry.timestamp || new Date().toISOString().replace('T', ' ').substring(0, 19),
+      user: entry.user || `${currentUser.name} (${currentUser.role})`,
+      userEmail: entry.userEmail || currentUser.email,
+      organization: entry.organization || currentOrg.name,
+      organizationId: entry.organizationId || currentOrg.id,
+      ip: entry.ip || '10.240.5.12',
+      category: entry.category || 'System Setting',
+      action: entry.action,
+      object: entry.object,
+      targetId: entry.targetId,
+      previousValue: entry.previousValue || 'N/A',
+      newValue: entry.newValue || 'Updated',
+      diffSummary: entry.diffSummary,
+      signatureHash: entry.signatureHash || `sha256:${randomHex}${Date.now().toString(16)}`,
+      result: entry.result || 'Success',
+      severity: entry.severity || 'Info'
+    };
+    setAuditLogs(prev => [newLog, ...prev]);
+  }, [currentUser, currentOrg]);
+
+  const recordAudit = useCallback((action: string, object: string, prevVal: string, newVal: string) => {
+    recordAuditLog({
       action,
       object,
       previousValue: prevVal,
       newValue: newVal,
-      result: 'Success'
-    };
-    setAuditLogs(prev => [newLog, ...prev]);
-  }, [currentUser, currentOrg]);
+      category: action.toLowerCase().includes('rule') ? 'Security Rule' : 'System Setting'
+    });
+  }, [recordAuditLog]);
 
   // -------------------------------------------------------------
   // DYNAMIC TENANT DATA ISOLATION (Strict filtering when org selected)
@@ -912,6 +953,243 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     addToast('Automated Report Dispatched', `Generated and delivered ${format} format to compliance distribution pipeline.`, 'success');
   }, [currentOrg, rawReportSchedules, addToast]);
 
+  // -------------------------------------------------------------
+  // RBAC & CUSTOM ROLE ACTIONS
+  // -------------------------------------------------------------
+  const addCustomRole = useCallback((roleData: Partial<CustomRole>): CustomRole => {
+    const newId = `role-${Date.now().toString(36)}`;
+    const newRole: CustomRole = {
+      id: newId,
+      name: roleData.name?.trim() || 'Custom Security Role',
+      description: roleData.description?.trim() || 'Custom security operations role with tailored granular permissions.',
+      isSystem: false,
+      color: roleData.color || 'blue',
+      scope: roleData.scope || 'Tenant Scoped',
+      permissions: roleData.permissions || [],
+      assignedUsersCount: 0,
+      createdAt: new Date().toISOString().split('T')[0],
+      updatedAt: new Date().toISOString().split('T')[0],
+      createdBy: `${currentUser.name} (${currentUser.role})`
+    };
+
+    setRoles(prev => [...prev, newRole]);
+    recordAuditLog({
+      category: 'Access & RBAC',
+      action: 'Custom RBAC Role Created',
+      object: `Role: ${newRole.name} (${newRole.id})`,
+      previousValue: 'None',
+      newValue: `Scope: ${newRole.scope}, Permissions: ${newRole.permissions.length} granted`,
+      diffSummary: `+ Created custom role "${newRole.name}" with ${newRole.permissions.length} capabilities`,
+      result: 'Success',
+      severity: 'Info'
+    });
+    addToast('Custom Role Created', `Defined "${newRole.name}" with ${newRole.permissions.length} permissions.`, 'success');
+    return newRole;
+  }, [currentUser, recordAuditLog, addToast]);
+
+  const updateCustomRole = useCallback((roleId: string, updates: Partial<CustomRole>) => {
+    const existing = roles.find(r => r.id === roleId);
+    if (!existing) return;
+
+    const oldName = existing.name;
+    const newName = updates.name?.trim() || existing.name;
+
+    const updatedRole: CustomRole = {
+      ...existing,
+      ...updates,
+      name: newName,
+      updatedAt: new Date().toISOString().split('T')[0]
+    };
+
+    setRoles(prev => prev.map(r => r.id === roleId ? updatedRole : r));
+
+    // If role name changed, update any users assigned to this role
+    if (oldName !== newName) {
+      setSystemUsers(prev => prev.map(u => u.role === oldName ? { ...u, role: newName } : u));
+      if (currentUser.role === oldName) {
+        setCurrentUser(prev => ({ ...prev, role: newName }));
+      }
+    }
+
+    recordAuditLog({
+      category: 'Access & RBAC',
+      action: 'RBAC Role Permissions Modified',
+      object: `Role: ${existing.name} (${existing.id})`,
+      previousValue: `Permissions: ${existing.permissions.length} granted, Scope: ${existing.scope}`,
+      newValue: `Permissions: ${updatedRole.permissions.length} granted, Scope: ${updatedRole.scope}`,
+      diffSummary: `~ Updated role definition for "${updatedRole.name}" (${updatedRole.permissions.length} permissions active)`,
+      result: 'Success',
+      severity: 'Medium'
+    });
+    addToast('Role Updated', `Modifications saved to "${updatedRole.name}".`, 'success');
+  }, [roles, currentUser, recordAuditLog, addToast]);
+
+  const cloneCustomRole = useCallback((roleId: string, newName?: string): CustomRole => {
+    const source = roles.find(r => r.id === roleId);
+    const targetName = newName?.trim() || `${source?.name || 'Custom'} (Copy)`;
+    const newId = `role-${Date.now().toString(36)}`;
+
+    const cloned: CustomRole = {
+      id: newId,
+      name: targetName,
+      description: `Cloned from ${source?.name || 'template'}. ${source?.description || ''}`,
+      isSystem: false,
+      color: source?.color === 'purple' ? 'indigo' : (source?.color || 'indigo'),
+      scope: source?.scope || 'Tenant Scoped',
+      permissions: source ? [...source.permissions] : [],
+      assignedUsersCount: 0,
+      createdAt: new Date().toISOString().split('T')[0],
+      updatedAt: new Date().toISOString().split('T')[0],
+      createdBy: `${currentUser.name} (${currentUser.role})`
+    };
+
+    setRoles(prev => [...prev, cloned]);
+    recordAuditLog({
+      category: 'Access & RBAC',
+      action: 'RBAC Role Cloned',
+      object: `Cloned: ${source?.name || roleId} -> ${cloned.name}`,
+      previousValue: source ? `Source Permissions: ${source.permissions.length}` : 'None',
+      newValue: `Permissions: ${cloned.permissions.length}, New Role ID: ${cloned.id}`,
+      diffSummary: `+ Cloned role "${source?.name}" to create "${cloned.name}" with ${cloned.permissions.length} capabilities`,
+      result: 'Success',
+      severity: 'Info'
+    });
+    addToast('Role Cloned', `Created "${cloned.name}" from template.`, 'success');
+    return cloned;
+  }, [roles, currentUser, recordAuditLog, addToast]);
+
+  const deleteCustomRole = useCallback((roleId: string): boolean => {
+    const target = roles.find(r => r.id === roleId);
+    if (!target) return false;
+    if (target.isSystem) {
+      addToast('Deletion Prohibited', `Cannot delete built-in system role "${target.name}".`, 'error');
+      return false;
+    }
+    const hasAssignedUsers = systemUsers.some(u => u.role === target.name);
+    if (hasAssignedUsers) {
+      addToast('Deletion Prohibited', `Cannot delete "${target.name}" because operators are currently assigned to this role. Please reassign them first.`, 'warning');
+      return false;
+    }
+
+    setRoles(prev => prev.filter(r => r.id !== roleId));
+    recordAuditLog({
+      category: 'Access & RBAC',
+      action: 'Custom RBAC Role Deleted',
+      object: `Role: ${target.name} (${target.id})`,
+      previousValue: `Permissions: ${target.permissions.length}, Scope: ${target.scope}`,
+      newValue: 'DELETED',
+      diffSummary: `- Removed custom role "${target.name}"`,
+      result: 'Success',
+      severity: 'Warning'
+    });
+    addToast('Role Deleted', `Custom role "${target.name}" has been deleted.`, 'info');
+    return true;
+  }, [roles, systemUsers, recordAuditLog, addToast]);
+
+  const addSystemUser = useCallback((userData: Partial<User>): User => {
+    const newId = `u-${Date.now().toString(36)}`;
+    const initials = (userData.name || 'US')
+      .split(' ')
+      .map(w => w[0])
+      .join('')
+      .substring(0, 2)
+      .toUpperCase();
+
+    const assignedOrg = userData.organizationName || (selectedOrgId === 'all' ? 'All Organizations (MSP)' : currentOrg.name);
+    const assignedOrgId = userData.organizationId || selectedOrgId;
+
+    const newUser: User = {
+      id: newId,
+      name: userData.name?.trim() || 'New Operator',
+      email: userData.email?.trim() || `operator@${currentOrg.domain || 'vanguardops.io'}`,
+      role: userData.role || 'Security Analyst',
+      avatar: initials,
+      organizationId: assignedOrgId,
+      organizationName: assignedOrg,
+      mfaEnabled: userData.mfaEnabled !== undefined ? userData.mfaEnabled : true,
+      lastLogin: 'Never',
+      status: userData.status || 'Active'
+    };
+
+    setSystemUsers(prev => [newUser, ...prev]);
+
+    // Update role assigned users count
+    setRoles(prev => prev.map(r => r.name === newUser.role ? { ...r, assignedUsersCount: r.assignedUsersCount + 1 } : r));
+
+    recordAuditLog({
+      category: 'Access & RBAC',
+      action: 'System User Provisioned',
+      object: `User: ${newUser.name} (${newUser.email})`,
+      previousValue: 'None',
+      newValue: `Role: ${newUser.role}, Scope: ${newUser.organizationName}, MFA: ${newUser.mfaEnabled}`,
+      diffSummary: `+ User account provisioned with role "${newUser.role}"`,
+      result: 'Success',
+      severity: 'Info'
+    });
+    addToast('Operator Provisioned', `Added ${newUser.name} as ${newUser.role}.`, 'success');
+    return newUser;
+  }, [currentOrg, selectedOrgId, recordAuditLog, addToast]);
+
+  const updateSystemUser = useCallback((userId: string, updates: Partial<User>) => {
+    const existing = systemUsers.find(u => u.id === userId);
+    if (!existing) return;
+
+    const oldRole = existing.role;
+    const newRole = updates.role || existing.role;
+
+    const updated = { ...existing, ...updates };
+    setSystemUsers(prev => prev.map(u => u.id === userId ? updated : u));
+
+    if (currentUser.id === userId || currentUser.email === existing.email) {
+      setCurrentUser(prev => ({ ...prev, ...updates }));
+    }
+
+    // Update counts if role changed
+    if (oldRole !== newRole) {
+      setRoles(prev => prev.map(r => {
+        if (r.name === oldRole) return { ...r, assignedUsersCount: Math.max(0, r.assignedUsersCount - 1) };
+        if (r.name === newRole) return { ...r, assignedUsersCount: r.assignedUsersCount + 1 };
+        return r;
+      }));
+    }
+
+    recordAuditLog({
+      category: 'Access & RBAC',
+      action: 'User Profile & Authorization Updated',
+      object: `User: ${existing.name} (${existing.email})`,
+      previousValue: `Role: ${oldRole}, MFA: ${existing.mfaEnabled}`,
+      newValue: `Role: ${newRole}, MFA: ${updated.mfaEnabled}`,
+      diffSummary: `~ Updated user ${existing.name}: Role ${oldRole} -> ${newRole}`,
+      result: 'Success',
+      severity: 'Medium'
+    });
+    addToast('User Updated', `Changes to ${updated.name} saved.`, 'success');
+  }, [systemUsers, currentUser, recordAuditLog, addToast]);
+
+  const deleteSystemUser = useCallback((userId: string) => {
+    const target = systemUsers.find(u => u.id === userId);
+    if (!target) return;
+    if (systemUsers.length <= 1) {
+      addToast('Action Prohibited', 'Cannot delete the only remaining administrator account.', 'error');
+      return;
+    }
+
+    setSystemUsers(prev => prev.filter(u => u.id !== userId));
+    setRoles(prev => prev.map(r => r.name === target.role ? { ...r, assignedUsersCount: Math.max(0, r.assignedUsersCount - 1) } : r));
+
+    recordAuditLog({
+      category: 'Access & RBAC',
+      action: 'System User Deactivated',
+      object: `User: ${target.name} (${target.email})`,
+      previousValue: `Role: ${target.role}, MFA: ${target.mfaEnabled}`,
+      newValue: 'DELETED',
+      diffSummary: `- Removed user account ${target.name}`,
+      result: 'Success',
+      severity: 'Warning'
+    });
+    addToast('User Removed', `Account ${target.name} deleted.`, 'info');
+  }, [systemUsers, recordAuditLog, addToast]);
+
   return (
     <AppContext.Provider
       value={{
@@ -922,6 +1200,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         addOrganization,
         deleteOrganization,
         updateOrganization,
+        recordAuditLog,
         currentUser,
         setUserRole,
         theme,
@@ -944,6 +1223,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         auditLogs,
         reportSchedules,
         reportLogs,
+        roles,
+        systemUsers,
+        systemPermissions: SYSTEM_PERMISSIONS,
+        addCustomRole,
+        updateCustomRole,
+        deleteCustomRole,
+        cloneCustomRole,
+        addSystemUser,
+        updateSystemUser,
+        deleteSystemUser,
         selectedEndpoint,
         setSelectedEndpoint,
         selectedAlert,

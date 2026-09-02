@@ -4,7 +4,49 @@ export type OrganizationRole =
   | 'Security Analyst' 
   | 'IT Admin' 
   | 'MSP Admin' 
-  | 'Read-only';
+  | 'Read-only'
+  | 'Incident Responder'
+  | 'Compliance Auditor'
+  | 'Patch Deployment Lead'
+  | string;
+
+export type PermissionModule = 
+  | 'Fleet & Endpoints'
+  | 'Vulnerabilities & CVEs'
+  | 'Patch Management'
+  | 'SOC & Incident Response'
+  | 'Detection & Sigma Rules'
+  | 'Threat Hunting & Forensics'
+  | 'Automated Reports'
+  | 'Tenant Management'
+  | 'System & RBAC Governance';
+
+export type PermissionRiskLevel = 'Low' | 'Medium' | 'High' | 'Critical';
+export type PermissionScope = 'Global MSP' | 'Tenant Scoped' | 'Site Specific';
+
+export interface SystemPermission {
+  id: string;
+  key: string;
+  name: string;
+  description: string;
+  module: PermissionModule;
+  riskLevel: PermissionRiskLevel;
+  requiresMfa?: boolean;
+}
+
+export interface CustomRole {
+  id: string;
+  name: string;
+  description: string;
+  isSystem: boolean;
+  color: string;
+  scope: PermissionScope;
+  permissions: string[];
+  assignedUsersCount: number;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+}
 
 export interface User {
   id: string;
@@ -13,8 +55,10 @@ export interface User {
   role: OrganizationRole;
   avatar: string;
   organizationId: string;
+  organizationName?: string;
   mfaEnabled: boolean;
   lastLogin: string;
+  status?: 'Active' | 'Suspended' | 'Invited';
 }
 
 export interface Organization {
@@ -355,13 +399,20 @@ export interface AuditLog {
   id: string;
   timestamp: string;
   user: string;
+  userEmail?: string;
   organization: string;
+  organizationId?: string;
   ip: string;
+  category?: 'Security Rule' | 'System Setting' | 'Tenant Perimeter' | 'Access & RBAC' | 'Vulnerability Policy' | 'Patch Policy' | 'Compliance';
   action: string;
   object: string;
+  targetId?: string;
   previousValue?: string;
   newValue?: string;
+  diffSummary?: string;
+  signatureHash?: string;
   result: 'Success' | 'Denied' | 'Failed';
+  severity?: 'Info' | 'Warning' | 'High' | 'Critical';
 }
 
 export interface ThreatHuntQuery {
